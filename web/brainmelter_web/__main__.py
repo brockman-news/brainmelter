@@ -38,8 +38,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--voices", type=Path, default=env_path("BRAINMELTER_VOICES"), help="directory of piper *.onnx models")
     p.add_argument("--fonts", type=Path, default=env_path("BRAINMELTER_FONTS"), help="directory with fonts.json and font files")
     p.add_argument("--state", type=Path, default=state_home / "brainmelter" / "headlines.jsonl")
-    p.add_argument("--pool-size", type=int, default=20000, help="headlines kept for replay")
-    p.add_argument("--snapshot", type=int, default=3000, help="headlines sent to a browser on connect")
+    p.add_argument("--pool-size", type=int, default=20000, help="headlines kept for speech lookups and language learning")
     # defaults leave half the CPU to the browser: an X220 (2 cores, 4 threads) gets 2 single-threaded syntheses
     p.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) // 2), help="parallel syntheses")
     p.add_argument("--threads-per-job", type=int, default=1, help="onnxruntime threads per synthesis")
@@ -96,13 +95,6 @@ def make_app(args: argparse.Namespace) -> web.Application:
     async def websocket(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
-        await ws.send_json(
-            {
-                "type": "hello",
-                "items": [asdict(i) for i in pool.recent(args.snapshot)],
-            },
-            dumps=lambda o: json.dumps(o, ensure_ascii=False),
-        )
         sockets.add(ws)
         async for msg in ws:  # clients never send anything meaningful; just keep the socket open
             if msg.type == WSMsgType.ERROR:

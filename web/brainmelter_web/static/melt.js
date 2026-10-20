@@ -30,48 +30,20 @@ const opt = {
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
-const chance = (p) => Math.random() < p;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 // ---------------------------------------------------------------- headlines
+//
+// Only what actually comes in: every live headline is read once and floats once; nothing is replayed.
 
-const items = [];
-const byId = new Map();
+const MAX_QUEUE = 200; // a safety bound only; bursts of ~50 headlines drain within a minute
 const liveQueue = [];
-
-function remember(item) {
-  if (byId.has(item.id)) return;
-  byId.set(item.id, item);
-  items.push(item);
-  if (items.length > 20000) byId.delete(items.shift().id);
-}
-
-// recent headlines are favoured, but anything in the pool can resurface
-function pickItem() {
-  if (!items.length) return null;
-  const back = Math.floor(-Math.log(1 - Math.random()) * 400);
-  return items[Math.max(0, items.length - 1 - (back % items.length))];
-}
-
-// feed errors ("Feed is empty — https://…") make texture, but nobody wants URLs read aloud
-function pickNews() {
-  for (let i = 0; i < 5; i++) {
-    const item = pickItem();
-    if (item?.kind === "news") return item;
-  }
-  return null;
-}
 
 function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
-    if (msg.type === "hello") {
-      msg.items.forEach(remember);
-    } else if (msg.type === "item") {
-      remember(msg.item);
-      onLive(msg.item);
-    }
+    if (msg.type === "item") onLive(msg.item);
   };
   ws.onclose = () => setTimeout(connect, 2000);
 }
@@ -215,7 +187,6 @@ function feedback(step, t) {
 // ---- tunnel: headlines fly at the viewer; spoken ones carry their voice's position
 
 const flyers = [];
-const MAX_AMBIENT_FLYERS = 28;
 const TUNNEL_TEXT = 0.35; // font size at distance 1, relative to the focal length
 const FADE_IN_MS = 1200;
 
@@ -269,18 +240,28 @@ function drawFlyers(dt, now) {
 // ---------------------------------------------------------------- overlays
 
 const terminal = document.getElementById("terminal");
+const TERMINAL_LINES = 6;
+const TYPE_SPEED = 60; // characters per second, multiplied by the backlog so no line is ever skipped
 const terminalLines = [];
+const terminalBacklog = [];
 
 function typeLine(item) {
   const time = new Date(item.t * 1000).toTimeString().slice(0, 8);
   const line = item.kind === "error" ? `${time} -${item.nick}- ${item.title}` : `${time} <${item.nick}> ${item.url} ${item.title}`;
-  terminalLines.push({ text: line, shown: 0 });
-  if (terminalLines.length > 6) terminalLines.shift();
+  terminalBacklog.push({ text: line, shown: 0 });
 }
 
 function drawTerminal(dt) {
-  const typing = terminalLines.find((l) => l.shown < l.text.length);
-  if (typing) typing.shown = Math.min(typing.text.length, typing.shown + Math.max(1, Math.round(60 * dt)));
+  let typing = terminalLines.at(-1);
+  if ((!typing || typing.shown === typing.text.length) && terminalBacklog.length) {
+    typing = terminalBacklog.shift();
+    terminalLines.push(typing);
+    if (terminalLines.length > TERMINAL_LINES) terminalLines.shift();
+  }
+  if (typing) {
+    const speed = TYPE_SPEED * (1 + terminalBacklog.length);
+    typing.shown = Math.min(typing.text.length, typing.shown + Math.max(1, Math.round(speed * dt)));
+  }
   terminal.textContent = terminalLines.map((l) => l.text.slice(0, l.shown)).join("\n") + "▌";
 }
 
@@ -341,7 +322,9 @@ async function speak(item) {
   inflight++;
   try {
     const response = await fetch(`/speak?id=${item.id}`);
-    if (!response.ok) return; // 503: the synthesizers are saturated, drop this one
+    // 503: the synthesizers are saturated; put it back so it is read a moment later instead of never
+    if (response.status === 503) return void liveQueue.unshift(item);
+    if (!response.ok) return;
     const audio = await ac.decodeAudioData(await response.arrayBuffer());
     const source = new AudioBufferSourceNode(ac, { buffer: audio });
     const gain = new GainNode(ac, { gain: rand(0.5, 1) });
@@ -365,11 +348,10 @@ async function speak(item) {
   }
 }
 
-function scheduleVoices(phase) {
-  if (!ac || !items.length) return;
-  const target = phase === "void" ? 1 : Math.round(1 + I ** 1.3 * (opt.maxVoices - 1));
-  if (active.size + inflight >= target || inflight >= 4) return;
-  const item = liveQueue.shift() ?? pickNews();
+// every headline gets read; the only limit is how many voices may overlap
+function scheduleVoices() {
+  if (!ac || active.size + inflight >= opt.maxVoices || inflight >= 4) return;
+  const item = liveQueue.shift();
   if (item) speak(item);
 }
 
@@ -378,15 +360,16 @@ function scheduleVoices(phase) {
 function onLive(item) {
   typeLine(item);
   if (item.kind === "error") return;
-  liveQueue.push(item);
-  if (liveQueue.length > 20) liveQueue.shift();
   surge = Math.min(0.4, surge + 0.2);
+  // silent screens show the headline right away; otherwise it floats in when its voice starts
+  if (!opt.audio) return void spawnFlyer(item.title);
+  liveQueue.push(item);
+  if (liveQueue.length > MAX_QUEUE) liveQueue.shift();
 }
 
 // ---------------------------------------------------------------- main loop
 
 let last = performance.now();
-let ambientDebt = 0;
 const frameInterval = 1000 / opt.fps;
 
 function frame(now) {
@@ -400,24 +383,13 @@ function frame(now) {
   I += (target - I) * (1 - Math.exp(-dt / 2.5));
   surge *= Math.exp(-dt / 6);
   hue = (hue + dt * (3 + 10 * I)) % 360;
-  document.body.classList.toggle("void", phase === "void");
 
   feedback(step, seconds);
-
-  // without audio (or between voices) the tunnel is fed silently
-  ambientDebt += dt * (phase === "void" ? 0.2 : 0.6 + 5 * I ** 2);
-  while (ambientDebt >= 1) {
-    ambientDebt -= 1;
-    const item = pickNews();
-    if (item && flyers.filter((f) => !f.spoken).length < MAX_AMBIENT_FLYERS) spawnFlyer(item.title);
-  }
-  if (!items.length && chance(0.02)) spawnFlyer("brockman.news");
-
   drawFlyers(dt, now);
   drawTerminal(dt);
 
   steerAudio(phase);
-  scheduleVoices(phase);
+  scheduleVoices();
 }
 
 // ---------------------------------------------------------------- start

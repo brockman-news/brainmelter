@@ -1,7 +1,7 @@
-"""Bounded, persistent pool of headlines seen on the channel.
+"""Bounded, persistent store of headlines seen on the channel.
 
-The live channel delivers a few headlines per minute; the installation replays the pool to stay overwhelming,
-and the state file keeps the pool filled across restarts (or when the congress network is down).
+Browsers fetch speech by headline id, and the state file lets every feed keep its language (and so its voice)
+across restarts. Nothing is replayed: the installation only shows and reads what comes in live.
 """
 
 import hashlib
@@ -71,6 +71,3 @@ class Pool:
 
     def get(self, id_: str) -> Item | None:
         return self.items.get(id_)
-
-    def recent(self, n: int) -> list[Item]:
-        return list(self.items.values())[-n:]
