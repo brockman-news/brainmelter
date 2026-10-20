@@ -10,7 +10,7 @@ At the same time the headlines are read aloud by many overlapping voices, each p
 Nothing flashes: everything fades in and out.
 
 - **Voices**: [piper](https://github.com/OHF-Voice/piper1-gpl) neural TTS, 26 models in 22 languages with 1509 speakers between them (`en_US-libritts_r-medium` has 904; `de_DE-thorsten_emotional` is angry, drunk, whispering…).
-  espeak-ng robots cover the remaining languages and take a share of utterances. Some utterances are deliberately read by a voice for the wrong language.
+  Every feed has its own fixed voice, derived from its bot name and its language (the majority language of its headlines): the same model, speaker, tempo and pitch every time it speaks. espeak-ng robots cover the languages piper lacks and are the fixed voice of some feeds.
   `en_US-libritts-high` (the same 904 speakers, about 3× slower) is pinned but not bundled by default.
 - **Fonts**: 26 Google Fonts for headlines (see `nix/fonts.nix`), with Noto/Rubik fallbacks for Greek, Cyrillic, Hebrew, CJK and Arabic. Nosifer is used only for the start screen title.
 - **Dramaturgy**: each cycle runs drift → build → melt → void, with smooth transitions. A live headline lifts the intensity a little.

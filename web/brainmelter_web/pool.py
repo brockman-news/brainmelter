@@ -9,7 +9,7 @@ import json
 import logging
 import time
 from collections import OrderedDict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -21,9 +21,11 @@ class Item:
     nick: str
     title: str
     url: str
-    lang: str
     kind: str  # "news" or "error"
     t: float
+
+
+FIELDS = {f.name for f in fields(Item)}
 
 
 def item_id(nick: str, title: str) -> str:
@@ -42,7 +44,7 @@ class Pool:
         with self.path.open(encoding="utf-8") as lines:
             for line in lines:
                 try:
-                    self._put(Item(**json.loads(line)))
+                    self._put(Item(**{k: v for k, v in json.loads(line).items() if k in FIELDS}))
                 except (ValueError, TypeError):
                     continue
         log.info("loaded %d headlines from %s", len(self.items), self.path)
@@ -59,8 +61,8 @@ class Pool:
         while len(self.items) > self.size:
             self.items.popitem(last=False)
 
-    def add(self, nick: str, title: str, url: str, lang: str, kind: str) -> Item:
-        item = Item(item_id(nick, title), nick, title, url, lang, kind, time.time())
+    def add(self, nick: str, title: str, url: str, kind: str) -> Item:
+        item = Item(item_id(nick, title), nick, title, url, kind, time.time())
         self._put(item)
         if self.path:
             with self.path.open("a", encoding="utf-8") as out:

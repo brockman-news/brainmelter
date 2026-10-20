@@ -36,7 +36,7 @@ STOPWORDS = {
     "da": "og i at det er en på til af for med den ikke efter",
     "no": "og i det er på til av for med som en ikke etter",
     "fi": "ja on ei se että oli mukaan kun hän myös nyt",
-    "et": "ja on ei et see kui oli ka mis aga kes",
+    "et": "ja on ei et see kui oli ka mis aga kes said sai tegi kuid ning oma juba veel nüüd pärast seda selle mille kas vastu eest",
     "hu": "a az és hogy nem is egy meg van már",
     "ro": "și în de la cu că pe nu din care pentru",
     "tr": "ve bir bu için ile da de mi olarak çok",
@@ -104,16 +104,20 @@ def guess(text: str) -> tuple[str | None, int]:
 
 
 class Detector:
-    """Guesses per headline, falling back to the majority language of the posting bot."""
+    """One language per feed (bot nick): the majority of its confidently guessed headlines.
+
+    A feed keeps its voice only if it keeps its language, so single headlines never override the majority.
+    """
 
     def __init__(self) -> None:
         self.by_nick: dict[str, Counter] = defaultdict(Counter)
 
-    def detect(self, nick: str, text: str) -> str:
+    def learn(self, nick: str, text: str) -> None:
         lang, score = guess(text)
-        history = self.by_nick[nick]
         if lang and score >= 3:
-            history[lang] += 1
-            return lang
-        # a weak guess is noise; most brockman feeds are English
+            self.by_nick[nick][lang] += 1
+
+    def language_of(self, nick: str) -> str:
+        history = self.by_nick.get(nick)
+        # no confident guess yet: most brockman feeds are English
         return history.most_common(1)[0][0] if history else "en"

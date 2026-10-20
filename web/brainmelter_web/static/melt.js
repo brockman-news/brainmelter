@@ -335,21 +335,22 @@ function steerAudio(phase) {
   droneFilter.frequency.setTargetAtTime(120 + 2500 * I ** 2, now, 1);
 }
 
-async function speak(item, { seed, wrong = false, rate = 1, delay = 0 }) {
+// the server picks the voice from the feed's name, so a feed sounds the same every time; nothing here alters
+// the voice (no pitch shifting, no copies)
+async function speak(item) {
   inflight++;
   try {
-    const response = await fetch(`/speak?id=${item.id}&seed=${seed}${wrong ? "&wrong=1" : ""}`);
+    const response = await fetch(`/speak?id=${item.id}`);
     if (!response.ok) return; // 503: the synthesizers are saturated, drop this one
     const audio = await ac.decodeAudioData(await response.arrayBuffer());
-    const duration = audio.duration / rate;
-    const source = new AudioBufferSourceNode(ac, { buffer: audio, playbackRate: rate });
+    const source = new AudioBufferSourceNode(ac, { buffer: audio });
     const gain = new GainNode(ac, { gain: rand(0.5, 1) });
     const panner = new PannerNode(ac, { panningModel: opt.pan, distanceModel: "inverse", refDistance: 1, rolloffFactor: 0.8 });
     source.connect(gain).connect(panner).connect(master);
     panner.connect(reverbSend);
-    const flyer = spawnFlyer(item.title, { duration: duration + delay, spoken: true });
+    const flyer = spawnFlyer(item.title, { duration: audio.duration, spoken: true });
     flyer.panner = panner;
-    source.start(ac.currentTime + delay);
+    source.start();
     active.add(source);
     source.onended = () => {
       active.delete(source);
@@ -368,18 +369,8 @@ function scheduleVoices(phase) {
   if (!ac || !items.length) return;
   const target = phase === "void" ? 1 : Math.round(1 + I ** 1.3 * (opt.maxVoices - 1));
   if (active.size + inflight >= target || inflight >= 4) return;
-  const live = liveQueue.shift();
-  const item = live ?? pickNews();
-  if (!item) return;
-  const rate = live ? 1 : I < 0.5 ? rand(0.92, 1.08) : rand(1 - 0.35 * I, 1 + 0.45 * I);
-  const wrong = !live && chance(I * 0.25);
-  // a canon: the same headline in several voices at once, slightly staggered
-  const copies = !live && chance(I ** 2 * 0.2) ? Math.floor(rand(3, 6)) : 1;
-  let delay = 0;
-  for (let i = 0; i < copies; i++) {
-    speak(item, { seed: Math.floor(Math.random() * 2 ** 31), wrong, rate: copies > 1 ? rate * rand(0.9, 1.1) : rate, delay });
-    delay += rand(0.05, 0.4);
-  }
+  const item = liveQueue.shift() ?? pickNews();
+  if (item) speak(item);
 }
 
 // ---------------------------------------------------------------- live headlines

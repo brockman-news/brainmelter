@@ -172,11 +172,9 @@ class Speech:
                 self.loaded.popitem(last=False)
         return voice
 
-    def _choose(self, lang: str, rng: random.Random, wrong: bool):
+    def _choose(self, lang: str, rng: random.Random):
         """Pick ("piper", model, speaker) or ("espeak", language, variant)."""
         native = self.by_lang.get(lang, [])
-        if wrong and self.models:
-            native = self.models  # any language's phonemizer reading this text: glossolalia
         if native and rng.random() >= self.robot_share:
             # big multi-speaker models dominate, but single-speaker voices still get airtime
             weights = [math.sqrt(m.speakers) for m in native]
@@ -227,15 +225,16 @@ class Speech:
         )
         return Utterance(result.stdout, f"espeak-ng {lang}+{variant}")
 
-    def _synthesize(self, text: str, lang: str, seed: int, wrong: bool) -> Utterance:
-        rng = random.Random(seed)
-        engine, a, b = self._choose(lang, rng, wrong)
+    def _synthesize(self, text: str, lang: str, nick: str) -> Utterance:
+        # the feed's name seeds everything (model, speaker, robot or not, tempo, pitch): one feed, one voice
+        rng = random.Random(f"{nick}\0{lang}")
+        engine, a, b = self._choose(lang, rng)
         if engine == "piper":
             return self._piper(a, b, text, rng)
         return self._espeak(a, b, text, rng)
 
-    async def speak(self, key: str, text: str, lang: str, seed: int, wrong: bool) -> Utterance:
-        cache_key = (key, seed, wrong)
+    async def speak(self, key: str, text: str, lang: str, nick: str) -> Utterance:
+        cache_key = (key, lang)
         if cached := self.cache.get(cache_key):
             self.cache.move_to_end(cache_key)
             return cached
@@ -244,7 +243,7 @@ class Speech:
         if self.pending >= self.max_backlog:
             raise Busy()
         self.pending += 1
-        future = asyncio.get_running_loop().run_in_executor(self.pool, self._synthesize, text, lang, seed, wrong)
+        future = asyncio.get_running_loop().run_in_executor(self.pool, self._synthesize, text, lang, nick)
         self.inflight[cache_key] = future
 
         def finished(done: asyncio.Future) -> None:

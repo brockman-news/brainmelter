@@ -66,6 +66,10 @@ def make_app(args: argparse.Namespace) -> web.Application:
     pool = Pool(args.state, args.pool_size)
     speech = Speech(args.voices, args.workers, args.threads_per_job, args.robot_share, args.max_models)
     detector = Detector()
+    # relearn every feed's language from the stored headlines, so feeds keep their voice across restarts
+    for item in pool.items.values():
+        if item.kind == "news":
+            detector.learn(item.nick, item.title)
     sockets: weakref.WeakSet[web.WebSocketResponse] = weakref.WeakSet()
     fonts = json.loads((args.fonts / "fonts.json").read_text()) if args.fonts else []
 
@@ -73,8 +77,9 @@ def make_app(args: argparse.Namespace) -> web.Application:
         title, url, kind = split_message(message)
         if not title:
             return
-        lang = detector.detect(message.nick, title) if kind == "news" else "en"
-        item = pool.add(message.nick, title, url, lang, kind)
+        if kind == "news":
+            detector.learn(message.nick, title)
+        item = pool.add(message.nick, title, url, kind)
         payload = json.dumps({"type": "item", "item": asdict(item)}, ensure_ascii=False)
         for ws in list(sockets):
             try:
@@ -110,12 +115,7 @@ def make_app(args: argparse.Namespace) -> web.Application:
         if item is None:
             raise web.HTTPNotFound()
         try:
-            seed = int(request.query.get("seed", "0"))
-        except ValueError:
-            raise web.HTTPBadRequest()
-        wrong = request.query.get("wrong") == "1"
-        try:
-            utterance = await speech.speak(item.id, item.title[:400], item.lang, seed, wrong)
+            utterance = await speech.speak(item.id, item.title[:400], detector.language_of(item.nick), item.nick)
         except Busy:
             raise web.HTTPServiceUnavailable(text="synthesis backlog full")
         return web.Response(
