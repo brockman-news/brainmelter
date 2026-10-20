@@ -2,7 +2,7 @@
   description = "BrainMelter flake with Liquidsoap and Shell script";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -22,6 +22,13 @@
             export PATH=$PATH:${pkgs.lib.makeBinPath [ pkgs.ffmpeg pkgs.flite pkgs.netcat pkgs.gawk ]}
             exec ${./irc-input.sh}
           '';
+
+          web = pkgs.callPackage ./nix/web.nix { };
+        };
+
+        apps.web = {
+          type = "app";
+          program = pkgs.lib.getExe self.packages.${system}.web;
         };
 
       }

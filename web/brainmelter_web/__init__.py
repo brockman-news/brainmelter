@@ -1,0 +1,1 @@
+"""BrainMelter web installation."""

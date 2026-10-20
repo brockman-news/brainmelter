@@ -21,6 +21,9 @@ irc.log
 # Generated output
 /output/
 
+# Python
+__pycache__/
+
 # Environment
 .env
 .envrc

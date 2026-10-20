@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brainmelter-web"
+version = "0.1.0"
+description = "Overwhelming news installation: brockman.news headlines in thousands of voices and dozens of fonts"
+requires-python = ">=3.11"
+dependencies = ["aiohttp", "piper-tts"]
+
+[project.scripts]
+brainmelter-web = "brainmelter_web.__main__:main"
+
+[tool.setuptools]
+packages = ["brainmelter_web"]
+
+[tool.setuptools.package-data]
+brainmelter_web = ["static/*"]
