@@ -70,8 +70,16 @@ async function loadFonts() {
 }
 
 const font = (family, px) => `${Math.round(px)}px "${family}", ${fallbackStack}`;
-// any hue at full chroma, but only lightnesses that stand out on black; OKLCH keeps "light" equally light in every hue
-const randomColor = () => `oklch(${rand(0.72, 0.93).toFixed(3)} 0.3 ${rand(0, 360).toFixed(1)})`;
+// one color per feed, so a feed is recognizable like its voice: any hue at full chroma, but only lightnesses that
+// stand out on black; OKLCH keeps "light" equally light in every hue
+function feedColor(nick) {
+  let h = 0x811c9dc5; // FNV-1a
+  for (let i = 0; i < nick.length; i++) h = Math.imul(h ^ nick.charCodeAt(i), 0x01000193);
+  h >>>= 0;
+  const hue = ((h & 0xffff) / 0x10000) * 360;
+  const light = 0.72 + ((h >>> 16) / 0x10000) * 0.21;
+  return `oklch(${light.toFixed(3)} 0.3 ${hue.toFixed(1)})`;
+}
 
 // ---------------------------------------------------------------- text sprites
 //
@@ -225,11 +233,11 @@ function placeY(h, speed, top, height) {
 
 // every flyer is a whole headline, upright, in a legible font with a dark outline so overlaps stay readable. It
 // moves by its own width over `duration`, so a spoken headline enters word by word as it is read.
-function spawnFlyer(text, { duration = text.length / READ_RATE, spoken = false } = {}) {
+function spawnFlyer(item, { duration = item.title.length / READ_RATE, spoken = false } = {}) {
   const { top, height } = band();
   const h = height * (spoken ? rand(0.09, 0.15) : rand(0.06, 0.1));
   // rasterized at its screen size: the sprite is ~1.95 font sizes tall including its padding
-  const sprite = textSprite(text, pick(readableFonts), h / 1.95, randomColor(), true);
+  const sprite = textSprite(item.title, pick(readableFonts), h / 1.95, feedColor(item.nick), true);
   const w = (sprite.width * h) / sprite.height;
   const speed = clamp(w / Math.max(duration, 1), W / 25, W / 5);
   const flyer = {
@@ -371,7 +379,7 @@ async function speak(item) {
     const panner = new PannerNode(ac, { panningModel: opt.pan, distanceModel: "inverse", refDistance: 1, rolloffFactor: 0.8 });
     source.connect(gain).connect(panner).connect(master);
     panner.connect(reverbSend);
-    const flyer = spawnFlyer(item.title, { duration: audio.duration, spoken: true });
+    const flyer = spawnFlyer(item, { duration: audio.duration, spoken: true });
     // the slot is freed by the clock, not by `onended`: a suspended AudioContext (autoplay policy, lost output
     // device) never ends a source, and would otherwise hold every slot and stop the headlines for good
     flyer.voice = { source, panner };
@@ -400,7 +408,7 @@ function onLive(item) {
   if (item.kind === "error") return;
   surge = Math.min(0.4, surge + 0.2);
   // silent screens show the headline right away; otherwise it scrolls in when its voice starts
-  if (!opt.audio) return void spawnFlyer(item.title);
+  if (!opt.audio) return void spawnFlyer(item);
   liveQueue.push(item);
   if (liveQueue.length > MAX_QUEUE) liveQueue.shift();
 }
