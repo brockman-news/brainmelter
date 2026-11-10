@@ -88,8 +88,13 @@ function feedColor(nick) {
 
 const MAX_SPRITE_WIDTH = 4096;
 
-function textSprite(text, family, px, fill, outline = false) {
+// right-to-left scripts; the first letter decides, as the Unicode bidi algorithm does for a paragraph
+const RTL_SCRIPT = /[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}]/u;
+const isRtl = (text) => RTL_SCRIPT.test(text.match(/\p{L}/u)?.[0] ?? "");
+
+function textSprite(text, family, px, fill, outline = false, rtl = false) {
   const measure = document.createElement("canvas").getContext("2d");
+  measure.direction = rtl ? "rtl" : "ltr";
   measure.font = font(family, px);
   let width = measure.measureText(text).width;
   if (width > MAX_SPRITE_WIDTH - px) {
@@ -104,6 +109,9 @@ function textSprite(text, family, px, fill, outline = false) {
   const x = sprite.getContext("2d");
   x.font = font(family, px);
   x.textBaseline = "middle";
+  // the paragraph direction puts punctuation and embedded Latin or digits in place; "left" anchors at the padding
+  x.direction = rtl ? "rtl" : "ltr";
+  x.textAlign = "left";
   if (outline) {
     x.lineJoin = "round";
     x.lineWidth = Math.max(2, px * 0.14);
@@ -195,7 +203,8 @@ function feedback(step, t) {
   ctx.globalAlpha = 1;
 }
 
-// ---- headlines scroll in from the right and out to the left, at any height; spoken ones carry their voice's position
+// ---- headlines scroll against their reading direction: most in from the right and out to the left, right-to-left
+// scripts the other way round, so every headline enters with its first word; spoken ones carry their voice's position
 
 const flyers = [];
 const READ_RATE = 15; // characters per second: the pace of headlines nobody reads aloud
@@ -208,23 +217,27 @@ function band() {
   return { top, height: bottom - top };
 }
 
+// how far the trailing end of a headline still has to travel to leave the screen
+const trail = (f) => (f.dir < 0 ? f.x + f.w : W - f.x);
+
 // room left in front of a new headline at height y: the gap to every headline it would touch, counting that it may be
-// faster and catch up before the other one has left
-function roomAt(y, h, speed) {
+// faster and catch up before the other one has left. Headlines coming the other way always collide, the longer they
+// stay the worse.
+function roomAt(y, h, speed, dir) {
   let room = W;
   for (const f of flyers) {
     if (Math.abs(f.y - y) >= (f.h + h) / 2) continue;
-    room = Math.min(room, W - (f.x + f.w) * Math.max(1, speed / f.speed));
+    room = Math.min(room, f.dir === dir ? W - trail(f) * Math.max(1, speed / f.speed) : -trail(f));
   }
   return room;
 }
 
 // random heights, so there are no rows: the first that is clear wins; on a crowded screen the one with the most room
-function placeY(h, speed, top, height) {
+function placeY(h, speed, dir, top, height) {
   let best = 0, bestRoom = -Infinity;
   for (let k = 0; k < PLACEMENT_TRIES; k++) {
     const y = rand(top + h / 2, top + height - h / 2);
-    const room = roomAt(y, h, speed);
+    const room = roomAt(y, h, speed, dir);
     if (room >= h) return y;
     if (room > bestRoom) [best, bestRoom] = [y, room];
   }
@@ -237,12 +250,15 @@ function spawnFlyer(item, { duration = item.title.length / READ_RATE, spoken = f
   const { top, height } = band();
   const h = height * (spoken ? rand(0.09, 0.15) : rand(0.06, 0.1));
   // rasterized at its screen size: the sprite is ~1.95 font sizes tall including its padding
-  const sprite = textSprite(item.title, pick(readableFonts), h / 1.95, feedColor(item.nick), true);
+  const rtl = isRtl(item.title);
+  const sprite = textSprite(item.title, pick(readableFonts), h / 1.95, feedColor(item.nick), true, rtl);
   const w = (sprite.width * h) / sprite.height;
   const speed = clamp(w / Math.max(duration, 1), W / 25, W / 5);
+  const dir = rtl ? 1 : -1;
   const flyer = {
-    x: W,
-    y: placeY(h, speed, top, height),
+    x: rtl ? -w : W,
+    y: placeY(h, speed, dir, top, height),
+    dir,
     w,
     h,
     speed,
@@ -268,8 +284,8 @@ function dropFlyer(i) {
 function drawFlyers(dt) {
   for (let i = flyers.length - 1; i >= 0; i--) {
     const f = flyers[i];
-    f.x -= f.speed * dt;
-    if (f.x + f.w < 0) {
+    f.x += f.dir * f.speed * dt;
+    if (f.dir < 0 ? f.x + f.w < 0 : f.x > W) {
       dropFlyer(i);
       continue;
     }
