@@ -1,7 +1,7 @@
 // BRAINMELTER — brockman.news firehose as an overwhelming wall of type and voices.
 //
-// Nothing flashes: every change in brightness is a fade. Only two layers carry text: whole headlines floating
-// through the tunnel, and the raw IRC stream at the bottom.
+// Nothing flashes: every change in brightness is a fade. Only two layers carry text: whole headlines scrolling
+// from right to left, and the raw IRC stream at the bottom.
 //
 // URL parameters:
 //   ?autostart        start without the click gate (run chromium with --autoplay-policy=no-user-gesture-required)
@@ -34,7 +34,7 @@ const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 // ---------------------------------------------------------------- headlines
 //
-// Only what actually comes in: every live headline is read once and floats once; nothing is replayed.
+// Only what actually comes in: every live headline is read once and scrolls by once; nothing is replayed.
 
 const MAX_QUEUE = 200; // a safety bound only; bursts of ~50 headlines drain within a minute
 const liveQueue = [];
@@ -150,7 +150,7 @@ const drip = Float32Array.from({ length: DRIP_COLUMNS }, () => Math.random());
 // the previous frame is redrawn, transformed and faded, under the new one: text trails, drips and swirls
 function feedback(step, t) {
   if (t > meltModeUntil) {
-    meltMode = pick(["drip", "drip", "zoom", "shear", "sink", "swirl"]);
+    meltMode = pick(["drip", "drip", "wind", "shear", "sink", "swirl"]);
     meltModeUntil = t + rand(12, 30);
   }
   bctx.drawImage(canvas, 0, 0);
@@ -166,6 +166,9 @@ function feedback(step, t) {
       const dy = (0.3 + drip[k] ** 3 * 8 * I) * opt.dpr * step;
       ctx.drawImage(buffer, k * cw, 0, cw + 1, H, k * cw, dy, cw + 1, H);
     }
+  } else if (meltMode === "wind") {
+    // trails stream off to the left, behind the scrolling headlines
+    ctx.drawImage(buffer, -(1 + 5 * I) * opt.dpr * step, 0);
   } else if (meltMode === "shear") {
     const rows = 24, rh = H / rows;
     for (let r = 0; r < rows; r++) {
@@ -173,7 +176,7 @@ function feedback(step, t) {
       ctx.drawImage(buffer, 0, r * rh, W, rh + 1, dx, r * rh, W, rh + 1);
     }
   } else {
-    const zoom = { zoom: 1 + 0.008 * I, sink: 1 - 0.006 * I, swirl: 1 + 0.004 * I }[meltMode];
+    const zoom = { sink: 1 - 0.006 * I, swirl: 1 + 0.004 * I }[meltMode];
     const turn = meltMode === "swirl" ? 0.004 * I * Math.sin(t * 0.2) : 0;
     ctx.setTransform(1, 0, 0, 1, W / 2, H / 2);
     ctx.rotate(turn * step);
@@ -184,55 +187,89 @@ function feedback(step, t) {
   ctx.globalAlpha = 1;
 }
 
-// ---- tunnel: headlines fly at the viewer; spoken ones carry their voice's position
+// ---- lanes: headlines scroll in from the right and out to the left; spoken ones carry their voice's position
 
 const flyers = [];
-const TUNNEL_TEXT = 0.35; // font size at distance 1, relative to the focal length
-const FADE_IN_MS = 1200;
+const LANES = 8;
+const lastInLane = new Array(LANES).fill(null);
+const READ_RATE = 15; // characters per second: the pace of headlines nobody reads aloud
 
-// every flyer is a whole headline, upright, in a legible font with a dark outline so overlaps stay readable
-// starts mid-distance and wide, so headlines spread across the whole screen instead of piling up in the centre
-function spawnFlyer(text, { duration = rand(6, 10), spoken = false } = {}) {
-  const z = rand(3, 6);
-  const px = spoken ? 96 : 72;
+// the band above the terminal, split into rows
+function lanes() {
+  const top = H * 0.03;
+  const bottom = Math.min(H, terminal.offsetTop * opt.dpr) - H * 0.02;
+  return { top, height: (bottom - top) / LANES };
+}
+
+// a lane is free when its last headline has fully entered and the new one, maybe faster, never catches up with it;
+// when every lane is taken the one with the most room is shared
+function pickLane(speed, margin) {
+  const free = [];
+  let best = 0, bestRoom = -Infinity;
+  for (let k = 0; k < LANES; k++) {
+    const prev = lastInLane[k];
+    const room = prev ? W - (prev.x + prev.w) * Math.max(1, speed / prev.speed) : W;
+    if (room >= margin) free.push(k);
+    if (room > bestRoom) [best, bestRoom] = [k, room];
+  }
+  return free.length ? pick(free) : best;
+}
+
+// every flyer is a whole headline, upright, in a legible font with a dark outline so overlaps stay readable. It
+// moves by its own width over `duration`, so a spoken headline enters word by word as it is read.
+function spawnFlyer(text, { duration = text.length / READ_RATE, spoken = false } = {}) {
+  const { height } = lanes();
+  const h = height * (spoken ? 1 : 0.75);
+  // rasterized at its screen size: the sprite is ~1.95 font sizes tall including its padding
+  const sprite = textSprite(text, pick(readableFonts), h / 1.95, randomColor(hue, spoken ? 72 : 62), true);
+  const w = (sprite.width * h) / sprite.height;
+  const speed = clamp(w / Math.max(duration, 1), W / 25, W / 5);
   const flyer = {
-    x: rand(-3, 3),
-    y: rand(-1.8, 1.8),
-    z,
-    vz: (z - 0.5) / duration,
-    born: performance.now(),
+    x: W,
+    w,
+    h,
+    speed,
+    lane: pickLane(speed, height),
     alpha: spoken ? 1 : 0.8,
-    px,
-    sprite: textSprite(text, pick(readableFonts), px, randomColor(hue, spoken ? 72 : 62), true),
-    spoken,
-    panner: null,
+    sprite,
+    voice: null,
+    voiceUntil: 0,
   };
+  lastInLane[flyer.lane] = flyer;
   flyers.push(flyer);
   return flyer;
 }
 
-function drawFlyers(dt, now) {
-  const focal = Math.min(W, H) * 0.6;
+function dropFlyer(i) {
+  const f = flyers[i];
+  flyers.splice(i, 1);
+  if (lastInLane[f.lane] === f) lastInLane[f.lane] = null;
+  if (f.voice) {
+    f.voice.source.stop();
+    f.voice.source.disconnect();
+    f.voice.panner.disconnect();
+  }
+}
+
+function drawFlyers(dt) {
+  const { top, height } = lanes();
   for (let i = flyers.length - 1; i >= 0; i--) {
     const f = flyers[i];
-    f.z -= f.vz * dt;
-    if (f.z < 0.5) {
-      flyers.splice(i, 1);
+    f.x -= f.speed * dt;
+    if (f.x + f.w < 0) {
+      dropFlyer(i);
       continue;
     }
-    if (f.panner) {
-      // listener sits at the origin looking down -z, like the viewer
-      f.panner.positionX.value = f.x * 2;
-      f.panner.positionY.value = -f.y * 2;
-      f.panner.positionZ.value = -f.z * 0.6;
+    const y = top + (f.lane + 0.5) * height;
+    if (f.voice) {
+      // listener sits at the origin looking down -z; the voice follows the visible part of its headline
+      const cx = (clamp(f.x, 0, W) + clamp(f.x + f.w, 0, W)) / 2;
+      f.voice.panner.positionX.value = (cx / W - 0.5) * 6;
+      f.voice.panner.positionY.value = (0.5 - y / H) * 3;
+      f.voice.panner.positionZ.value = -1.5;
     }
-    const scale = (TUNNEL_TEXT * focal) / f.z / f.px; // sprite px → screen px
-    const h = f.sprite.height * scale;
-    if (h < 3) continue;
-    const w = f.sprite.width * scale;
-    // fade in over time and out before it grows past the screen; nothing ever pops
-    ctx.globalAlpha = f.alpha * clamp((now - f.born) / FADE_IN_MS, 0, 1) * clamp(f.z - 0.5, 0, 1);
-    ctx.drawImage(f.sprite, W / 2 + (f.x * focal) / f.z - w / 2, H / 2 + (f.y * focal) / f.z - h / 2, w, h);
+    ctx.globalAlpha = f.alpha;
+    ctx.drawImage(f.sprite, f.x, y - f.h / 2, f.w, f.h);
   }
   ctx.globalAlpha = 1;
 }
@@ -269,7 +306,6 @@ function drawTerminal(dt) {
 
 let ac = null, master, reverbSend, droneGain, droneFilter;
 let muted = false;
-const active = new Set();
 let inflight = 0;
 
 function impulse(seconds, decay) {
@@ -332,15 +368,11 @@ async function speak(item) {
     source.connect(gain).connect(panner).connect(master);
     panner.connect(reverbSend);
     const flyer = spawnFlyer(item.title, { duration: audio.duration, spoken: true });
-    flyer.panner = panner;
+    // the slot is freed by the clock, not by `onended`: a suspended AudioContext (autoplay policy, lost output
+    // device) never ends a source, and would otherwise hold every slot and stop the headlines for good
+    flyer.voice = { source, panner };
+    flyer.voiceUntil = performance.now() + audio.duration * 1000;
     source.start();
-    active.add(source);
-    source.onended = () => {
-      active.delete(source);
-      flyer.panner = null;
-      source.disconnect();
-      panner.disconnect();
-    };
   } catch (err) {
     console.warn("speech failed", err);
   } finally {
@@ -349,8 +381,10 @@ async function speak(item) {
 }
 
 // every headline gets read; the only limit is how many voices may overlap
-function scheduleVoices() {
-  if (!ac || active.size + inflight >= opt.maxVoices || inflight >= 4) return;
+function scheduleVoices(now) {
+  if (!ac || inflight >= 4) return;
+  const voicing = flyers.reduce((n, f) => n + (f.voiceUntil > now), 0);
+  if (voicing + inflight >= opt.maxVoices) return;
   const item = liveQueue.shift();
   if (item) speak(item);
 }
@@ -361,7 +395,7 @@ function onLive(item) {
   typeLine(item);
   if (item.kind === "error") return;
   surge = Math.min(0.4, surge + 0.2);
-  // silent screens show the headline right away; otherwise it floats in when its voice starts
+  // silent screens show the headline right away; otherwise it scrolls in when its voice starts
   if (!opt.audio) return void spawnFlyer(item.title);
   liveQueue.push(item);
   if (liveQueue.length > MAX_QUEUE) liveQueue.shift();
@@ -385,11 +419,11 @@ function frame(now) {
   hue = (hue + dt * (3 + 10 * I)) % 360;
 
   feedback(step, seconds);
-  drawFlyers(dt, now);
+  drawFlyers(dt);
   drawTerminal(dt);
 
   steerAudio(phase);
-  scheduleVoices();
+  scheduleVoices(now);
 }
 
 // ---------------------------------------------------------------- start
@@ -397,7 +431,8 @@ function frame(now) {
 let started = false;
 
 function start() {
-  if (started) return;
+  // a later click brings back a context the browser suspended
+  if (started) return void ac?.resume();
   started = true;
   document.body.classList.add("melting");
   if (opt.audio) {

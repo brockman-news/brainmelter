@@ -5,8 +5,8 @@ A multi-voice audio mixer and streamer that takes speech input from IRC or local
 ## Web installation (40C3)
 
 `brainmelter-web` follows brockman's `#all` channel on `brockman.news` and plays it in a fullscreen browser page.
-Only what actually comes in: every new headline is read aloud once, in its feed's voice, and floats through a 3D tunnel once — upright, in a random legible font with a dark outline — while the picture behind it melts. Nothing is replayed.
-Voices overlap whenever headlines arrive faster than they can be read, placed where their headline floats. The raw IRC stream types along at the bottom and never skips a line; it types faster when messages pile up.
+Only what actually comes in: every new headline is read aloud once, in its feed's voice, and scrolls across the screen from right to left once — upright, in a random legible font with a dark outline, entering word by word as it is read — while the picture behind it melts. Nothing is replayed.
+Voices overlap whenever headlines arrive faster than they can be read, placed where their headline scrolls. The raw IRC stream types along at the bottom and never skips a line; it types faster when messages pile up.
 Nothing flashes: everything fades in and out.
 
 - **Voices**: [piper](https://github.com/OHF-Voice/piper1-gpl) neural TTS, 26 models in 22 languages with 1509 speakers between them (`en_US-libritts_r-medium` has 904; `de_DE-thorsten_emotional` is angry, drunk, whispering…).
