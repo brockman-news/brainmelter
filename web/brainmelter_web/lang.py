@@ -80,12 +80,28 @@ def cyrillic(text: str) -> str:
     return "bg" if re.search(r"[ъЪ]", text) else "ru"
 
 
-def guess(text: str) -> tuple[str | None, int]:
-    """Return (language, confidence score)."""
+# languages that share a script: a feed's voice can read every headline in its own script
+SCRIPT_FAMILY = {"zh": "han", "ja": "han", "ru": "cyrillic", "uk": "cyrillic", "bg": "cyrillic", "fa": "arabic", "ar": "arabic"}
+SCRIPT_LANGS = {lang for lang, _ in SCRIPTS}
+
+
+def script_family(lang: str) -> str:
+    return SCRIPT_FAMILY.get(lang, lang if lang in SCRIPT_LANGS else "latin")
+
+
+def script_language(text: str) -> str | None:
+    """The language a non-Latin script gives away, or None for Latin text."""
     for lang, pattern in SCRIPTS:
         hits = len(pattern.findall(text))
         if hits >= 2 or (hits and lang in ("fa", "ja", "ka", "hy")):
-            return (cyrillic(text) if lang == "cyrillic" else lang), 10
+            return cyrillic(text) if lang == "cyrillic" else lang
+    return None
+
+
+def guess(text: str) -> tuple[str | None, int]:
+    """Return (language, confidence score)."""
+    if lang := script_language(text):
+        return lang, 10
     lowered = text.lower()
     scores = Counter()
     # evidence shared by several languages ("in", "de", "ä") counts for less than evidence unique to one
@@ -106,7 +122,8 @@ def guess(text: str) -> tuple[str | None, int]:
 class Detector:
     """One language per feed (bot nick): the majority of its confidently guessed headlines.
 
-    A feed keeps its voice only if it keeps its language, so single headlines never override the majority.
+    A feed keeps its voice only if it keeps its language, so single headlines never override the majority, except
+    when they are written in a script the feed's voice can't read at all (see `language_for`).
     """
 
     def __init__(self) -> None:
@@ -121,3 +138,17 @@ class Detector:
         history = self.by_nick.get(nick)
         # no confident guess yet: most brockman feeds are English
         return history.most_common(1)[0][0] if history else "en"
+
+    def language_for(self, nick: str, text: str) -> str:
+        """The feed's language, unless the headline is in a script that language's voices can't read.
+
+        An Italian feed's Japanese headline would otherwise be read letter by letter ("chinese letter, chinese
+        letter…"). Kana prove Japanese even in a Chinese feed; Han alone stays with a Japanese feed.
+        """
+        feed = self.language_of(nick)
+        lang = script_language(text)
+        if lang is None or lang == feed:
+            return feed
+        if lang == "ja" or script_family(lang) != script_family(feed):
+            return lang
+        return feed

@@ -80,6 +80,7 @@ python3Packages.buildPythonApplication {
   build-system = [ python3Packages.setuptools ];
   dependencies = [
     python3Packages.aiohttp
+    python3Packages.pykakasi
     piper
   ];
 

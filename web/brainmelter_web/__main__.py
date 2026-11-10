@@ -107,7 +107,8 @@ def make_app(args: argparse.Namespace) -> web.Application:
         if item is None:
             raise web.HTTPNotFound()
         try:
-            utterance = await speech.speak(item.id, item.title[:400], detector.language_of(item.nick), item.nick)
+            lang = detector.language_for(item.nick, item.title)
+            utterance = await speech.speak(item.id, item.title[:400], lang, item.nick)
         except Busy:
             raise web.HTTPServiceUnavailable(text="synthesis backlog full")
         return web.Response(

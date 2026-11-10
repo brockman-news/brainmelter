@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import onnxruntime
+import pykakasi
 from piper import PiperConfig, PiperVoice, SynthesisConfig
 
 log = logging.getLogger(__name__)
@@ -127,6 +128,8 @@ class Speech:
         self.cache: OrderedDict[tuple, Utterance] = OrderedDict()
         self.cache_size = cache_size
         self.inflight: dict[tuple, asyncio.Future] = {}
+        self.kakasi = pykakasi.kakasi()
+        self.kakasi_lock = threading.Lock()
 
         if self.max_loaded <= 0:
             self.max_loaded = models_that_fit(len(self.models))
@@ -225,7 +228,14 @@ class Speech:
         )
         return Utterance(result.stdout, f"espeak-ng {lang}+{variant}")
 
+    def _kana(self, text: str) -> str:
+        """Kanji spelled out in hiragana: espeak-ng's Japanese only reads kana and says "chinese letter" for kanji."""
+        with self.kakasi_lock:
+            return "".join(token["hira"] for token in self.kakasi.convert(text))
+
     def _synthesize(self, text: str, lang: str, nick: str) -> Utterance:
+        if lang == "ja":
+            text = self._kana(text)
         # the feed's name seeds everything (model, speaker, robot or not, tempo, pitch): one feed, one voice
         rng = random.Random(f"{nick}\0{lang}")
         engine, a, b = self._choose(lang, rng)
