@@ -70,7 +70,8 @@ async function loadFonts() {
 }
 
 const font = (family, px) => `${Math.round(px)}px "${family}", ${fallbackStack}`;
-const randomColor = (hue, light = 60) => `hsl(${(hue + rand(-50, 50) + 360) % 360} 100% ${light}%)`;
+// any hue at full chroma, but only lightnesses that stand out on black; OKLCH keeps "light" equally light in every hue
+const randomColor = () => `oklch(${rand(0.72, 0.93).toFixed(3)} 0.3 ${rand(0, 360).toFixed(1)})`;
 
 // ---------------------------------------------------------------- text sprites
 //
@@ -141,7 +142,6 @@ function resize() {
 }
 addEventListener("resize", resize);
 
-let hue = rand(0, 360);
 let meltMode = "drip";
 let meltModeUntil = 0;
 const DRIP_COLUMNS = 48;
@@ -187,55 +187,62 @@ function feedback(step, t) {
   ctx.globalAlpha = 1;
 }
 
-// ---- lanes: headlines scroll in from the right and out to the left; spoken ones carry their voice's position
+// ---- headlines scroll in from the right and out to the left, at any height; spoken ones carry their voice's position
 
 const flyers = [];
-const LANES = 8;
-const lastInLane = new Array(LANES).fill(null);
 const READ_RATE = 15; // characters per second: the pace of headlines nobody reads aloud
+const PLACEMENT_TRIES = 16;
 
-// the band above the terminal, split into rows
-function lanes() {
+// the band above the terminal
+function band() {
   const top = H * 0.03;
   const bottom = Math.min(H, terminal.offsetTop * opt.dpr) - H * 0.02;
-  return { top, height: (bottom - top) / LANES };
+  return { top, height: bottom - top };
 }
 
-// a lane is free when its last headline has fully entered and the new one, maybe faster, never catches up with it;
-// when every lane is taken the one with the most room is shared
-function pickLane(speed, margin) {
-  const free = [];
-  let best = 0, bestRoom = -Infinity;
-  for (let k = 0; k < LANES; k++) {
-    const prev = lastInLane[k];
-    const room = prev ? W - (prev.x + prev.w) * Math.max(1, speed / prev.speed) : W;
-    if (room >= margin) free.push(k);
-    if (room > bestRoom) [best, bestRoom] = [k, room];
+// room left in front of a new headline at height y: the gap to every headline it would touch, counting that it may be
+// faster and catch up before the other one has left
+function roomAt(y, h, speed) {
+  let room = W;
+  for (const f of flyers) {
+    if (Math.abs(f.y - y) >= (f.h + h) / 2) continue;
+    room = Math.min(room, W - (f.x + f.w) * Math.max(1, speed / f.speed));
   }
-  return free.length ? pick(free) : best;
+  return room;
+}
+
+// random heights, so there are no rows: the first that is clear wins; on a crowded screen the one with the most room
+function placeY(h, speed, top, height) {
+  let best = 0, bestRoom = -Infinity;
+  for (let k = 0; k < PLACEMENT_TRIES; k++) {
+    const y = rand(top + h / 2, top + height - h / 2);
+    const room = roomAt(y, h, speed);
+    if (room >= h) return y;
+    if (room > bestRoom) [best, bestRoom] = [y, room];
+  }
+  return best;
 }
 
 // every flyer is a whole headline, upright, in a legible font with a dark outline so overlaps stay readable. It
 // moves by its own width over `duration`, so a spoken headline enters word by word as it is read.
 function spawnFlyer(text, { duration = text.length / READ_RATE, spoken = false } = {}) {
-  const { height } = lanes();
-  const h = height * (spoken ? 1 : 0.75);
+  const { top, height } = band();
+  const h = height * (spoken ? rand(0.09, 0.15) : rand(0.06, 0.1));
   // rasterized at its screen size: the sprite is ~1.95 font sizes tall including its padding
-  const sprite = textSprite(text, pick(readableFonts), h / 1.95, randomColor(hue, spoken ? 72 : 62), true);
+  const sprite = textSprite(text, pick(readableFonts), h / 1.95, randomColor(), true);
   const w = (sprite.width * h) / sprite.height;
   const speed = clamp(w / Math.max(duration, 1), W / 25, W / 5);
   const flyer = {
     x: W,
+    y: placeY(h, speed, top, height),
     w,
     h,
     speed,
-    lane: pickLane(speed, height),
-    alpha: spoken ? 1 : 0.8,
+    alpha: spoken ? 1 : 0.85,
     sprite,
     voice: null,
     voiceUntil: 0,
   };
-  lastInLane[flyer.lane] = flyer;
   flyers.push(flyer);
   return flyer;
 }
@@ -243,7 +250,6 @@ function spawnFlyer(text, { duration = text.length / READ_RATE, spoken = false }
 function dropFlyer(i) {
   const f = flyers[i];
   flyers.splice(i, 1);
-  if (lastInLane[f.lane] === f) lastInLane[f.lane] = null;
   if (f.voice) {
     f.voice.source.stop();
     f.voice.source.disconnect();
@@ -252,7 +258,6 @@ function dropFlyer(i) {
 }
 
 function drawFlyers(dt) {
-  const { top, height } = lanes();
   for (let i = flyers.length - 1; i >= 0; i--) {
     const f = flyers[i];
     f.x -= f.speed * dt;
@@ -260,16 +265,15 @@ function drawFlyers(dt) {
       dropFlyer(i);
       continue;
     }
-    const y = top + (f.lane + 0.5) * height;
     if (f.voice) {
       // listener sits at the origin looking down -z; the voice follows the visible part of its headline
       const cx = (clamp(f.x, 0, W) + clamp(f.x + f.w, 0, W)) / 2;
       f.voice.panner.positionX.value = (cx / W - 0.5) * 6;
-      f.voice.panner.positionY.value = (0.5 - y / H) * 3;
+      f.voice.panner.positionY.value = (0.5 - f.y / H) * 3;
       f.voice.panner.positionZ.value = -1.5;
     }
     ctx.globalAlpha = f.alpha;
-    ctx.drawImage(f.sprite, f.x, y - f.h / 2, f.w, f.h);
+    ctx.drawImage(f.sprite, f.x, f.y - f.h / 2, f.w, f.h);
   }
   ctx.globalAlpha = 1;
 }
@@ -416,7 +420,6 @@ function frame(now) {
   const { phase, target } = dramaturgy(seconds);
   I += (target - I) * (1 - Math.exp(-dt / 2.5));
   surge *= Math.exp(-dt / 6);
-  hue = (hue + dt * (3 + 10 * I)) % 360;
 
   feedback(step, seconds);
   drawFlyers(dt);
