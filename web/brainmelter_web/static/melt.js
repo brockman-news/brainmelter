@@ -1,7 +1,7 @@
 // BRAINMELTER — brockman.news firehose as an overwhelming wall of type and voices.
 //
-// Nothing flashes: every change in brightness is a fade. Only two layers carry text: whole headlines scrolling
-// from right to left, and the raw IRC stream at the bottom.
+// Nothing flashes: headlines slide in and out at the screen edges, crisp on black. Only two layers carry text: whole
+// headlines scrolling across, and the raw IRC stream at the bottom.
 //
 // URL parameters:
 //   ?autostart        start without the click gate (run chromium with --autoplay-policy=no-user-gesture-required)
@@ -146,62 +146,13 @@ function dramaturgy(seconds) {
 
 const canvas = document.getElementById("melt");
 const ctx = canvas.getContext("2d", { alpha: false });
-const buffer = document.createElement("canvas");
-const bctx = buffer.getContext("2d", { alpha: false });
 let W = 0, H = 0;
 
 function resize() {
-  W = canvas.width = buffer.width = Math.floor(innerWidth * opt.dpr);
-  H = canvas.height = buffer.height = Math.floor(innerHeight * opt.dpr);
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, W, H);
+  W = canvas.width = Math.floor(innerWidth * opt.dpr);
+  H = canvas.height = Math.floor(innerHeight * opt.dpr);
 }
 addEventListener("resize", resize);
-
-let meltMode = "drip";
-let meltModeUntil = 0;
-const DRIP_COLUMNS = 48;
-const drip = Float32Array.from({ length: DRIP_COLUMNS }, () => Math.random());
-
-// the previous frame is redrawn, transformed and faded, under the new one: text trails, drips and swirls
-function feedback(step, t) {
-  if (t > meltModeUntil) {
-    meltMode = pick(["drip", "drip", "wind", "shear", "sink", "swirl"]);
-    meltModeUntil = t + rand(12, 30);
-  }
-  bctx.drawImage(canvas, 0, 0);
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, W, H);
-  // short trails keep every headline legible; the persistence follows the smoothed intensity, so it never jumps
-  ctx.globalAlpha = (0.5 + 0.25 * I) ** step;
-  if (meltMode === "drip") {
-    const cw = W / DRIP_COLUMNS;
-    for (let k = 0; k < DRIP_COLUMNS; k++) {
-      drip[k] = clamp(drip[k] + rand(-0.05, 0.05), 0, 1);
-      const dy = (0.3 + drip[k] ** 3 * 8 * I) * opt.dpr * step;
-      ctx.drawImage(buffer, k * cw, 0, cw + 1, H, k * cw, dy, cw + 1, H);
-    }
-  } else if (meltMode === "wind") {
-    // trails stream off to the left, behind the scrolling headlines
-    ctx.drawImage(buffer, -(1 + 5 * I) * opt.dpr * step, 0);
-  } else if (meltMode === "shear") {
-    const rows = 24, rh = H / rows;
-    for (let r = 0; r < rows; r++) {
-      const dx = Math.sin(r * 0.37 + t * 1.3) * (1 + 4 * I) * opt.dpr * step;
-      ctx.drawImage(buffer, 0, r * rh, W, rh + 1, dx, r * rh, W, rh + 1);
-    }
-  } else {
-    const zoom = { sink: 1 - 0.006 * I, swirl: 1 + 0.004 * I }[meltMode];
-    const turn = meltMode === "swirl" ? 0.004 * I * Math.sin(t * 0.2) : 0;
-    ctx.setTransform(1, 0, 0, 1, W / 2, H / 2);
-    ctx.rotate(turn * step);
-    ctx.scale(zoom ** step, zoom ** step);
-    ctx.drawImage(buffer, -W / 2, -H / 2);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-  }
-  ctx.globalAlpha = 1;
-}
 
 // ---- headlines scroll against their reading direction: most in from the right and out to the left, right-to-left
 // scripts the other way round, so every headline enters with its first word; spoken ones carry their voice's position
@@ -439,13 +390,12 @@ function frame(now) {
   if (now - last < frameInterval - 2) return;
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  const step = dt * 60;
-  const seconds = (now - startedAt) / 1000;
-  const { phase, target } = dramaturgy(seconds);
+  const { phase, target } = dramaturgy((now - startedAt) / 1000);
   I += (target - I) * (1 - Math.exp(-dt / 2.5));
   surge *= Math.exp(-dt / 6);
 
-  feedback(step, seconds);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, W, H);
   drawFlyers(dt);
   drawTerminal(dt);
 

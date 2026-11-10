@@ -5,7 +5,7 @@ A multi-voice audio mixer and streamer that takes speech input from IRC or local
 ## Web installation (40C3)
 
 `brainmelter-web` follows brockman's `#all` channel on `brockman.news` and plays it in a fullscreen browser page.
-Only what actually comes in: every new headline is read aloud once, in its feed's voice, and scrolls across the screen once — from right to left, or from left to right for Arabic, Hebrew and other right-to-left scripts — upright, in a random legible font with a dark outline, entering word by word as it is read, while the picture behind it melts. Nothing is replayed.
+Only what actually comes in: every new headline is read aloud once, in its feed's voice, and scrolls across the screen once — from right to left, or from left to right for Arabic, Hebrew and other right-to-left scripts — upright, in a random legible font with a dark outline and its feed's colour, entering word by word as it is read. Nothing is replayed.
 Voices overlap whenever headlines arrive faster than they can be read, placed where their headline scrolls. The raw IRC stream types along at the bottom and never skips a line; it types faster when messages pile up.
 Nothing flashes: everything fades in and out.
 
@@ -13,7 +13,7 @@ Nothing flashes: everything fades in and out.
   Every feed has its own fixed voice, derived from its bot name and its language (the majority language of its headlines): the same model, speaker, tempo and pitch every time it speaks. espeak-ng robots cover the languages piper lacks and are the fixed voice of some feeds.
   `en_US-libritts-high` (the same 904 speakers, about 3× slower) is pinned but not bundled by default.
 - **Fonts**: 26 Google Fonts for headlines (see `nix/fonts.nix`), with Noto/Rubik fallbacks for Greek, Cyrillic, Hebrew, CJK and Arabic. Nosifer is used only for the start screen title.
-- **Dramaturgy**: the melting, colours and reverb cycle through drift → build → melt → void with smooth transitions; new headlines lift the intensity a little. The amount of text and voices is whatever the feeds deliver.
+- **Dramaturgy**: the reverb (and the optional drone) cycle through drift → build → melt → void with smooth transitions; new headlines lift the intensity a little. The amount of text and voices is whatever the feeds deliver.
 - **Persistence**: every headline is appended to `~/.local/state/brainmelter/headlines.jsonl`, so feeds keep their language, and therefore their voice, across restarts.
 
 ```sh
