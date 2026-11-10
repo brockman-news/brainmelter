@@ -14,10 +14,6 @@
         };
       in {
         packages = {
-          mixer = pkgs.writeShellScriptBin "mixer" ''
-            exec ${pkgs.liquidsoap}/bin/liquidsoap ${./mixer.liq}
-          '';
-
           irc-input = pkgs.writeShellScriptBin "irc-input" ''
             export PATH=$PATH:${pkgs.lib.makeBinPath [ pkgs.ffmpeg pkgs.flite pkgs.netcat pkgs.gawk ]}
             exec ${./irc-input.sh}

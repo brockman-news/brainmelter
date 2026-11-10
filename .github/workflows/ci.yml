@@ -7,39 +7,12 @@ on:
     branches: [ main ]
 
 jobs:
-  lint:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Check shell scripts with shellcheck
-        run: |
-          sudo apt-get install -y shellcheck
-          shellcheck scripts/*.sh setup.sh
-      
-      - name: Check Liquidsoap scripts
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y liquidsoap
-          liquidsoap --check config/brainmelter.liq
-  
-  test-setup:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y liquidsoap ffmpeg netcat flite espeak bc
-      
-      - name: Run setup script
-        run: |
-          chmod +x setup.sh
-          ./setup.sh
-      
-      - name: Verify scripts are executable
-        run: |
-          test -x scripts/espeak-direct.sh
-          test -x scripts/irc-to-brainmelter.sh
-          test -x scripts/parallel-speech-irc.sh
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - name: Evaluate the flake (packages, apps, NixOS module)
+        run: nix flake check
+      - name: Build the packages
+        run: nix build --print-build-logs .#web .#irc-input
